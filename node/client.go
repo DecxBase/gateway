@@ -1,15 +1,31 @@
 package node
 
 import (
-	"fmt"
+	"os"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/gobeam/stringy"
 	"github.com/phuslu/log"
 )
 
 type ClientOptions struct {
-	Timezone *time.Location
+	Device   string
 	Logger   *log.Logger
+	Timezone *time.Location
+}
+
+func (co ClientOptions) GetDevice() string {
+	if len(co.Device) > 0 {
+		return co.Device
+	}
+
+	device, err := os.Hostname()
+	if err != nil {
+		device = "localhost"
+	}
+
+	return device
 }
 
 func (co ClientOptions) GetTimezone() *time.Location {
@@ -21,68 +37,98 @@ func (co ClientOptions) GetTimezone() *time.Location {
 }
 
 type client struct {
-	Name         string
-	Title        string
-	Description  string
-	Version      string
-	MountPoint   string
-	MountVersion string
+	device       string
+	name         string
+	title        string
+	description  string
+	version      string
+	mountPoint   string
+	mountVersion string
+	category     string
+	tags         []string
 	Logger       *log.Logger
+	Handlers     []*clientRoute
+	Router       *gin.Engine
+}
+
+func (c *client) SetDevice(device string) *client {
+	c.device = device
+	c.Logger.Context = log.NewContext(nil).Str("device", device).Value()
+	return c
 }
 
 func (c *client) SetTitle(title string) *client {
-	c.Title = title
+	c.title = title
 	return c
 }
 
 func (c *client) SetDescription(desc string) *client {
-	c.Description = desc
+	c.description = desc
 	return c
 }
 
 func (c *client) SetVersion(version string) *client {
-	c.Version = version
+	c.version = version
 	return c
 }
 
 func (c *client) SetMount(path string) *client {
-	c.MountPoint = path
+	if !ValidIdentifier(path) {
+		c.Logger.Panic().Msgf("Invalid client mount point: %s", path)
+	}
+
+	c.mountPoint = path
 	return c
 }
 
 func (c *client) SetMountVersion(version string) *client {
-	c.MountVersion = version
+	if !ValidIdentifier(version) {
+		c.Logger.Panic().Msgf("Invalid client mount version: %s", version)
+	}
+
+	c.mountVersion = version
 	return c
 }
 
-func (c client) Initiate(endpoint string, accessKey string) {
-	fmt.Printf("TIME TO INITIATE CLIENT: %v\n", c)
+func (c *client) SetCategory(cat string) *client {
+	c.category = cat
+	return c
 }
 
-func Client(name string, options *ClientOptions) *client {
-	var logger *log.Logger
-
-	if options.Logger != nil {
-		logger = options.Logger
-	} else {
-		logger = &log.Logger{
-			Caller:       1,
-			TimeFormat:   "15:04:05",
-			TimeLocation: options.GetTimezone(),
-			Writer: &log.ConsoleWriter{
-				ColorOutput:    true,
-				QuoteString:    true,
-				EndWithMessage: true,
-			},
-		}
-	}
-
-	return &client{
-		Name:   name,
-		Logger: logger,
-	}
+func (c *client) SetTags(tags []string) *client {
+	c.tags = tags
+	return c
 }
 
-func DefaultClient(name string) *client {
-	return Client(name, &ClientOptions{})
+func (c client) DisplayName() string {
+	if len(c.title) > 0 {
+		return c.title
+	}
+
+	return stringy.New(c.name).Title()
+}
+
+func (c client) MountPath() string {
+	var path = c.mountPoint
+
+	if len(path) < 1 {
+		path = c.name
+	}
+
+	if len(c.mountVersion) > 0 {
+		path += "/" + c.mountVersion
+	}
+
+	return "/" + path
+}
+
+func (c client) Run(endpoint string, opts ...RegistryOptions) {
+	var options = ResolveRegistryOptions(opts...)
+
+	c.Register(endpoint, options)
+	c.RunRouter(options.LocalAddress)
+}
+
+func (c client) String() string {
+	return c.DisplayName() + "@" + c.version
 }
